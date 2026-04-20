@@ -3,6 +3,7 @@ const express = require('express');
 const router = express.Router();
 const orchestrator = require('../services/orchestrator');
 const simulationEngine = require('../engine/simulation');
+const firebaseService = require('../services/firebase');
 
 // User query endpoint
 router.post('/query', async (req, res) => {
@@ -30,6 +31,11 @@ router.post('/admin/state', (req, res) => {
 // View current simulation state
 router.get('/simulation', (req, res) => {
     res.json(simulationEngine.getZones());
+});
+
+// Get pathways network
+router.get('/pathways', (req, res) => {
+    res.json(simulationEngine.getPathways());
 });
 
 // Fetch recent interactions from Firebase

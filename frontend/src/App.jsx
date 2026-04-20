@@ -1,304 +1,373 @@
-import React, { useState, useEffect, useRef } from 'react';
+import React, { useState, useEffect, useRef, useMemo } from 'react';
 import './Dashboard.css';
 
 /**
- * Simple Sparkline component for BigQuery trends
+ * Typewriter Effect Hook - Smooth character streaming
  */
-const Sparkline = ({ data }) => {
-  if (!data || data.length === 0) return null;
-  const width = 100;
-  const height = 40;
-  const max = Math.max(...data);
-  const min = Math.min(...data);
-  const range = max - min || 1;
-  const points = data.map((d, i) => ({
-    x: (i / (data.length - 1)) * width,
-    y: height - ((d - min) / range) * height
-  }));
-
-  const pathData = `M ${points.map(p => `${p.x},${p.y}`).join(' L ')}`;
-
-  return (
-    <svg viewBox={`0 0 ${width} ${height}`} className="sparkline-container" aria-label="Congestion trend chart">
-      <path d={pathData} fill="none" stroke="#6366f1" strokeWidth="2" strokeLinecap="round" />
-    </svg>
-  );
+const useTypewriter = (text, speed = 20, active = true) => {
+  const [displayText, setDisplayText] = useState('');
+  useEffect(() => {
+    if (!active || !text) return;
+    setDisplayText('');
+    let i = 0;
+    const interval = setInterval(() => {
+      setDisplayText((prev) => prev + text.charAt(i));
+      i++;
+      if (i >= text.length) clearInterval(interval);
+    }, speed);
+    return () => clearInterval(interval);
+  }, [text, speed, active]);
+  return displayText;
 };
 
 /**
- * Interactive Stadium Map (Circular Bowl SVG)
+ * Interactive SVG Map Engine
+ * Supports Mouse Zoom/Pan and UI control buttons
  */
-const StadiumMap = ({ recommendedPath, facilities }) => {
+const MapEngine = ({ zones, pathways, recommendedPath, activeLayers, zoom, pan, onPan, onZoom }) => {
+  const [isDragging, setIsDragging] = useState(false);
+  const [lastPos, setLastPos] = useState({ x: 0, y: 0 });
+
+  const handleMouseDown = (e) => {
+    setIsDragging(true);
+    setLastPos({ x: e.clientX, y: e.clientY });
+  };
+
+  const handleMouseMove = (e) => {
+    if (!isDragging) return;
+    const dx = e.clientX - lastPos.x;
+    const dy = e.clientY - lastPos.y;
+    onPan(dx, dy);
+    setLastPos({ x: e.clientX, y: e.clientY });
+  };
+
+  const handleMouseUp = () => setIsDragging(false);
+
   return (
-    <svg viewBox="0 0 500 500" className="stadium-svg" aria-label="Interactive Stadium Map">
-      {/* Outer Stadium Structure */}
-      <circle cx="250" cy="250" r="220" fill="#161b22" stroke="#30363d" strokeWidth="4" />
-      <circle cx="250" cy="250" r="180" fill="#0d1117" stroke="#30363d" strokeWidth="2" />
-      
-      {/* Pitch / Center */}
-      <rect x="180" y="210" width="140" height="80" fill="#1b222b" rx="4" />
-      
-      {/* Gates */}
-      <g className="gates">
-        <text x="250" y="20" className="gate-label">North Gate</text>
-        <circle cx="250" cy="30" r="5" fill="#8b949e" />
-        
-        <text x="250" y="490" className="gate-label">South Gate</text>
-        <circle cx="250" cy="470" r="5" fill="#8b949e" />
-        
-        <text x="10" y="255" className="gate-label" style={{textAnchor: 'start'}}>West Gate</text>
-        <circle cx="30" cy="250" r="5" fill="#8b949e" />
-        
-        <text x="490" y="255" className="gate-label" style={{textAnchor: 'end'}}>East Gate</text>
-        <circle cx="470" cy="250" r="5" fill="#8b949e" />
-      </g>
+    <div 
+      className="map-viewport"
+      onMouseDown={handleMouseDown}
+      onMouseMove={handleMouseMove}
+      onMouseUp={handleMouseUp}
+      onMouseLeave={handleMouseUp}
+    >
+      <div className="scanline"></div>
+      <div className="map-svg-container" style={{ transform: `scale(${zoom}) translate(${pan.x}px, ${pan.y}px)` }}>
+        <svg viewBox="0 0 500 500" aria-label="Stadium Operational HUD Map">
+          <defs>
+            <filter id="neonGlow" x="-20%" y="-20%" width="140%" height="140%">
+              <feGaussianBlur stdDeviation="3" result="blur" />
+              <feMerge>
+                <feMergeNode in="blur" />
+                <feMergeNode in="SourceGraphic" />
+              </feMerge>
+            </filter>
+          </defs>
 
-      {/* Facility Markers */}
-      {facilities.map((f, i) => (
-        <g key={i} className="marker" tabIndex="0" role="button" aria-label={`${f.name} - ${f.type}`}>
-          <circle cx={f.x} cy={f.y} r="10" fill={f.color || "#30363d"} />
-          <text x={f.x} y={f.y + 4} fontSize="10" textAnchor="middle" fill="white">{f.icon}</text>
-          <title>{f.name} ({f.type})</title>
-        </g>
-      ))}
+          {/* Stadium Architecture Rings */}
+          <circle cx="250" cy="250" r="235" fill="none" stroke="var(--border)" strokeWidth="0.5" strokeDasharray="5 5" />
+          <circle cx="250" cy="250" r="200" fill="rgba(0, 242, 255, 0.03)" stroke="var(--border)" strokeWidth="2" />
+          <circle cx="250" cy="250" r="160" fill="none" stroke="var(--border)" strokeWidth="1" />
+          
+          {/* Pitch Area */}
+          <rect x="185" y="215" width="130" height="70" fill="rgba(15, 23, 42, 0.8)" stroke="var(--border)" strokeWidth="1" rx="4" />
 
-      {/* Recommended AI Path Animation */}
-      {recommendedPath && (
-        <path 
-          d={recommendedPath} 
-          className="route-path animate-path" 
-          aria-label="AI Recommended Route Path"
-        />
-      )}
-    </svg>
+          {/* Connected Web-like Pathway Network */}
+          <g className="paths" stroke="rgba(0, 242, 255, 0.15)" strokeWidth="1.5" fill="none">
+            {pathways.map((path, idx) => {
+              const start = zones[path.from];
+              const end = zones[path.to];
+              if (!start || !end) return null;
+              return (
+                <path 
+                  key={`path-${idx}`} 
+                  d={`M ${start.x},${start.y} Q 250,250 ${end.x},${end.y}`} 
+                  className="base-path" 
+                />
+              );
+            })}
+          </g>
+
+          {/* Normalized Heatmap Overlay (Normalized Percentage of Capacity) */}
+          {activeLayers.data && Object.entries(zones).map(([name, z]) => {
+            const density = (z.crowdLevel / z.capacity) * 100;
+            const color = density > 75 ? 'var(--neon-red)' : density > 50 ? 'var(--neon-purple)' : 'var(--neon-blue)';
+            return (
+              <g key={`heat-${name}`}>
+                <circle 
+                  cx={z.x} cy={z.y} 
+                  r={density / 4 + 10} 
+                  className="heatmap-pulse" 
+                  fill={color} 
+                  style={{ opacity: 0.35, filter: 'blur(12px)' }} 
+                />
+                {density > 60 && (
+                  <text x={z.x} y={z.y - 12} fontSize="7" fill={color} textAnchor="middle" fontStyle="italic">
+                    DENSITY: {Math.round(density)}%
+                  </text>
+                )}
+              </g>
+            );
+          })}
+
+          {/* AI Recommended Particle Flow Route */}
+          {recommendedPath && (
+            <g filter="url(#neonGlow)">
+              <path 
+                d={recommendedPath} 
+                fill="none" 
+                stroke="var(--neon-blue)" 
+                strokeWidth="4" 
+                className="route-particle" 
+              />
+              <circle cx={recommendedPath.split('L')[0].replace('M', '').split(',')[0]} cy={recommendedPath.split('L')[0].replace('M', '').split(',')[1]} r="6" fill="var(--neon-blue)" />
+              <circle cx={recommendedPath.split('L').pop().split(',')[0]} cy={recommendedPath.split('L').pop().split(',')[1]} r="8" fill="var(--neon-green)" />
+            </g>
+          )}
+
+          {/* Facility Layer Markers (with Toggles) */}
+          {Object.entries(zones).filter(([_, z]) => activeLayers[z.type]).map(([name, z]) => (
+            <g key={name} className="marker" tabIndex="0" role="button" aria-label={`${name} - ${z.type}`}>
+               <circle cx={z.x} cy={z.y} r="8" fill="var(--hud-panel)" stroke={z.type === 'gate' ? 'var(--neon-blue)' : 'var(--text-dim)'} strokeWidth="1.5" />
+               <text x={z.x} y={z.y + 3} fontSize="9" textAnchor="middle" fill="white">
+                 {z.type === 'gate' ? name[0] : '•'}
+               </text>
+               <text x={z.x} y={z.y + 20} fontSize="7" textAnchor="middle" fill="var(--text-dim)">{name}</text>
+               <title>{name} ({z.type.toUpperCase()})</title>
+            </g>
+          ))}
+        </svg>
+      </div>
+    </div>
   );
 };
 
 function App() {
   const [query, setQuery] = useState('');
   const [isProcessing, setIsProcessing] = useState(false);
-  const [activeStep, setActiveStep] = useState(null); // 'bq', 'vertex', 'firebase'
-  const [stepsStatus, setStepsStatus] = useState({ bq: 'idle', vertex: 'idle', firebase: 'idle' });
-  const [result, setResult] = useState(null);
+  const [activeStep, setActiveStep] = useState(null);
+  const [apiResponse, setApiResponse] = useState(null);
+  const [zones, setZones] = useState({});
+  const [pathways, setPathways] = useState([]);
   const [logs, setLogs] = useState([]);
-  const [currentPath, setCurrentPath] = useState(null);
+  
+  // HUD Interaction States
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [activeRoute, setActiveRoute] = useState(null);
+  const [layers, setLayers] = useState({
+    data: true, gate: true, food: true, aid: true, vip: true, metro: true, cab: true, fanzone: true, merch: true, security: true, restroom: true
+  });
 
-  // Facility Data
-  const facilities = [
-    { name: 'VIP Lounge A', type: 'VIP', x: 250, y: 150, icon: '👑', color: '#f59e0b' },
-    { name: 'Security Post North', type: 'Security', x: 200, y: 70, icon: '🛡️', color: '#ef4444' },
-    { name: 'Food Stall 1', type: 'Food', x: 100, y: 150, icon: '🍔' },
-    { name: 'First Aid North', type: 'Safety', x: 400, y: 150, icon: '🏥', color: '#ef4444' },
-    { name: 'Metro Station', type: 'Transport', x: 250, y: 430, icon: '🚇', color: '#6366f1' },
-    { name: 'Fan Zone East', type: 'Entertainment', x: 420, y: 300, icon: '🎉' },
-    { name: 'Cab Pickup South', type: 'Transport', x: 350, y: 460, icon: '🚕', color: '#6366f1' },
-    { name: 'Restroom West', type: 'Utility', x: 80, y: 350, icon: '🚻' },
-  ];
+  const typedReasoning = useTypewriter(apiResponse?.structuredResponse.justification, 18, !!apiResponse);
 
-  // Fetch logs on mount
+  // Initialize and keep state stable
   useEffect(() => {
-    fetchLogs();
+    const init = async () => {
+      try {
+        const [zRes, pRes, lRes] = await Promise.all([
+          fetch('/api/simulation'),
+          fetch('/api/pathways'),
+          fetch('/api/logs')
+        ]);
+        setZones(await zRes.json());
+        setPathways(await pRes.json());
+        setLogs(await lRes.json());
+      } catch (err) { console.error('Bootstrap error', err); }
+    };
+    init();
+
+    const interval = setInterval(async () => {
+      try {
+        const res = await fetch('/api/simulation');
+        const data = await res.json();
+        if (data && Object.keys(data).length > 0) setZones(data);
+      } catch (e) {}
+    }, 4000);
+    return () => clearInterval(interval);
   }, []);
 
-  const fetchLogs = async () => {
-    try {
-      const res = await fetch('/api/logs');
-      const data = await res.json();
-      setLogs(data);
-    } catch (err) {
-      console.error('Failed to fetch logs:', err);
-    }
-  };
-
-  const runAnalysis = async () => {
+  const handleAnalysis = async () => {
     if (!query || isProcessing) return;
     setIsProcessing(true);
-    setResult(null);
-    setCurrentPath(null);
-    setStepsStatus({ bq: 'idle', vertex: 'idle', firebase: 'idle' });
+    // Persist activeRoute until new results come in
 
-    // Step 1: BigQuery (Sequential execution with 800ms delays)
-    setActiveStep('bq');
-    setStepsStatus(prev => ({ ...prev, bq: 'loading' }));
-    await new Promise(r => setTimeout(r, 800));
-    
     try {
-      const response = await fetch('/api/query', {
+      // Step 1: BigQuery Link
+      setActiveStep('bq');
+      await new Promise(r => setTimeout(r, 900));
+      
+      const res = await fetch('/api/query', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ userId: 'demo_user', query })
+        body: JSON.stringify({ userId: 'OPERATOR_727', query })
       });
-      const data = await response.json();
-      
-      setStepsStatus(prev => ({ ...prev, bq: 'success' }));
-      
-      // Step 2: Vertex AI
+      const data = await res.json();
+
+      // Step 2: Vertex Intelligence
       setActiveStep('vertex');
-      setStepsStatus(prev => ({ ...prev, vertex: 'loading' }));
-      await new Promise(r => setTimeout(r, 800));
-      setStepsStatus(prev => ({ ...prev, vertex: 'success' }));
+      await new Promise(r => setTimeout(r, 1200));
 
-      // Step 3: Firebase
+      // Step 3: Firebase Persistence
       setActiveStep('firebase');
-      setStepsStatus(prev => ({ ...prev, firebase: 'loading' }));
       await new Promise(r => setTimeout(r, 800));
-      setStepsStatus(prev => ({ ...prev, firebase: 'success' }));
 
-      setResult(data);
+      setApiResponse(data);
       setIsProcessing(false);
       setActiveStep(null);
-      fetchLogs(); // Refresh logs panel
-
-      // Visual Path Simulation based on response
-      if (data.structuredResponse.direction.includes('North')) {
-        setCurrentPath("M 250,250 C 250,200 250,100 250,30");
-      } else if (data.structuredResponse.direction.includes('South')) {
-        setCurrentPath("M 250,250 C 250,300 250,400 250,470");
-      } else if (data.structuredResponse.direction.includes('East')) {
-        setCurrentPath("M 250,250 C 300,250 400,250 470,250");
-      } else {
-        setCurrentPath("M 250,250 C 200,250 100,250 30,250");
-      }
-
+      
+      // Update Route from Gate to Destination
+      const dest = data.structuredResponse.destination || 'Fan Plaza';
+      const startNode = zones['North Gate'] || {x: 250, y: 50};
+      const endNode = zones[dest] || {x: 250, y: 250};
+      setActiveRoute(`M ${startNode.x},${startNode.y} L ${endNode.x},${endNode.y}`);
+      
+      // Refresh Logs
+      const logRes = await fetch('/api/logs');
+      setLogs(await logRes.json());
     } catch (err) {
-      console.error(err);
       setIsProcessing(false);
+      setActiveStep(null);
     }
   };
 
   return (
-    <div className="dashboard-container">
-      <header className="header" role="banner">
-        <div>
-          <h1>Smart Stadium AI Console</h1>
-          <div className="subtitle">Operational Command Center • v2.1.0</div>
-        </div>
-        <div className="subtitle" style={{textAlign: 'right'}}>
-          Detected Integration: <span style={{color: '#6366f1'}}>BigQuery</span> | <span style={{color: '#10b981'}}>Vertex AI</span> | <span style={{color: '#f59e0b'}}>Firebase</span>
+    <div className="hud-container">
+      <header className="header glass-panel">
+        <h1>Command Console // AI System Active</h1>
+        <div className="subtitle" style={{ color: 'var(--text-dim)', fontSize: '0.75rem', fontFamily: 'var(--font-mono)' }}>
+          INTEGRATION: <span style={{color: 'var(--neon-blue)'}}>BigQuery Data Layer</span> | <span style={{color: 'var(--neon-purple)'}}>Vertex AI Engine</span> | <span style={{color: 'var(--neon-green)'}}>Firebase Logs</span>
         </div>
       </header>
 
-      <aside className="left-panel" role="complementary" aria-label="Command Input">
-        <section className="card">
-          <h2 className="card-title">⌨️ COMMAND CENTER</h2>
-          <label htmlFor="userQuery" className="visually-hidden">Enter Stadium Query</label>
+      <aside className="sidebar left-panel glass-panel" role="complementary" aria-label="Command Center">
+        <section className="hud-card">
+          <div className="card-label">Command Center [Operator Input]</div>
           <input 
-            id="userQuery"
             type="text" 
-            placeholder="Ask about stadium navigation or safety..." 
+            placeholder="ACCESSING STADIUM NETWORK..." 
             value={query}
             onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && runAnalysis()}
-            aria-required="true"
+            onKeyDown={(e) => e.key === 'Enter' && handleAnalysis()}
+            aria-label="Input Query for Stadium AI"
           />
           <button 
-            onClick={runAnalysis} 
+            onClick={handleAnalysis} 
             disabled={isProcessing}
-            style={{marginTop: '1rem', width: '100%'}}
-            aria-label="Submit Analysis Query"
+            style={{ width: '100%', marginTop: '0.75rem' }}
           >
-            {isProcessing ? 'PROCESSING...' : 'RUN AI ANALYSIS'}
+            {isProcessing ? 'SCANNING...' : 'EXECUTE SCAN'}
           </button>
         </section>
 
-        <section className="card">
-          <h2 className="card-title">🔄 SERVICE FLOW WATCH</h2>
-          <div className="step-container">
-            <div className={`step-item ${activeStep === 'bq' ? 'active' : ''} ${stepsStatus.bq === 'success' ? 'success' : ''}`}>
-              <div className="step-label">1. BigQuery Data Fetch</div>
-              {stepsStatus.bq === 'success' && <span>✅</span>}
-            </div>
-            <div className={`step-item ${activeStep === 'vertex' ? 'active' : ''} ${stepsStatus.vertex === 'success' ? 'success' : ''}`}>
-              <div className="step-label">2. Vertex AI Reasoning</div>
-              {stepsStatus.vertex === 'success' && <span>✅</span>}
-            </div>
-            <div className={`step-item ${activeStep === 'firebase' ? 'active' : ''} ${stepsStatus.firebase === 'success' ? 'success' : ''}`}>
-              <div className="step-label">3. Firebase Audit Sync</div>
-              {stepsStatus.firebase === 'success' && <span>✅</span>}
-            </div>
+        <section className="hud-card">
+          <div className="card-label">Live Signal Flow [Service Monitoring]</div>
+          <div className={`step-item ${activeStep === 'bq' ? 'active' : ''} ${apiResponse ? 'success' : ''}`}>
+             <span>01 // BIGQUERY DATASTREAM</span>
+          </div>
+          <div className={`step-item ${activeStep === 'vertex' ? 'active' : ''} ${apiResponse ? 'success' : ''}`}>
+             <span>02 // VERTEX AI NEURAL ENGINE</span>
+          </div>
+          <div className={`step-item ${activeStep === 'firebase' ? 'active' : ''} ${apiResponse ? 'success' : ''}`}>
+             <span>03 // FIREBASE AUDIT LOGGING</span>
           </div>
         </section>
 
-        {result && result.bqData && (
-          <section className="card fade-in">
-            <h2 className="card-title">📊 BigQuery ANALYTICS</h2>
-            <div className="data-grid">
-              <div className="data-item">
-                <div className="data-value">{result.bqData.averageCrowd}%</div>
-                <div className="data-label">Avg. Congestion</div>
+        {apiResponse?.bqData && (
+          <section className="hud-card">
+            <div className="card-label">B-Query Telemetry</div>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
+              <div>
+                <div style={{fontSize: '1.2rem', color: 'var(--neon-blue)'}}>{apiResponse.bqData.averageCrowd}%</div>
+                <div style={{fontSize: '0.6rem', color: 'var(--text-dim)'}}>AVG CONGESTION</div>
               </div>
-              <div className="data-item">
-                <div className="data-value">{result.bqData.congestionLevel}</div>
-                <div className="data-label">Risk Level</div>
+              <div>
+                <div className={`risk-${apiResponse.priority === 'high' ? 'high' : 'low'}`} style={{fontSize: '1.1rem'}}>{apiResponse.bqData.congestionLevel}</div>
+                <div style={{fontSize: '0.6rem', color: 'var(--text-dim)'}}>RISK STATUS</div>
               </div>
             </div>
-            <div style={{marginTop: '0.5rem', fontSize: '0.75rem', color: 'var(--text-secondary)'}}>
-              Peak Traffic: {result.bqData.peakTime}
-            </div>
-            <Sparkline data={result.bqData.trends} />
-            <div style={{textAlign: 'center', fontSize: '0.65rem', color: 'var(--text-secondary)', marginTop: '4px'}}>Historical Congestion Trend (24h)</div>
+            <svg viewBox="0 0 100 20" style={{ width: '100%', height: '30px', marginTop: '10px' }}>
+               <path d="M 0,15 L 20,10 L 40,12 L 60,5 L 80,18 L 100,10" fill="none" stroke="var(--neon-blue)" strokeWidth="1" />
+            </svg>
           </section>
         )}
       </aside>
 
-      <main className="center-panel" role="main" aria-label="Stadium Map View">
-        <StadiumMap recommendedPath={currentPath} facilities={facilities} />
-        {currentPath && (
-          <div className="fade-in glass" style={{position: 'absolute', bottom: '2rem', background: 'rgba(13,17,23,0.8)', padding: '1rem', border: '1px solid var(--primary-glow)', borderRadius: '8px'}}>
-            <div style={{fontSize: '0.8rem', fontWeight: 600}}>AI Recommended Path Active</div>
-            <div style={{fontSize: '0.7rem', color: 'var(--text-secondary)'}}>Optimizing for {result?.structuredResponse.direction} destination</div>
-          </div>
-        )}
+      <main className="map-viewport" role="main" aria-label="Interactive Navigation Console">
+        <div className="layer-toggles">
+          {Object.keys(layers).map(layer => (
+            <button 
+              key={layer}
+              className={`layer-btn ${layers[layer] ? 'active' : ''}`}
+              onClick={() => setLayers(p => ({...p, [layer]: !p[layer]}))}
+              aria-pressed={layers[layer]}
+            >
+              <div style={{fontSize: '1rem'}}>{layer === 'data' ? '📊' : layer === 'gate' ? '🚪' : layer === 'food' ? '🍔' : '📍'}</div>
+              <span>{layer.toUpperCase()}</span>
+            </button>
+          ))}
+        </div>
+
+        <div className="map-controls">
+          <button className="control-btn" onClick={() => setZoom(z => Math.min(z + 0.2, 3))} aria-label="Zoom In">+</button>
+          <button className="control-btn" onClick={() => setZoom(z => Math.max(z - 0.2, 0.5))} aria-label="Zoom Out">-</button>
+          <button className="control-btn" onClick={() => {setZoom(1); setPan({x:0, y:0})}} aria-label="Reset View">↺</button>
+        </div>
+
+        <MapEngine 
+           zones={zones} 
+           pathways={pathways}
+           recommendedPath={activeRoute}
+           activeLayers={layers}
+           zoom={zoom}
+           pan={pan}
+           onPan={(dx, dy) => setPan(p => ({ x: p.x + dx, y: p.y + dy }))}
+           onZoom={(dz) => setZoom(z => Math.max(0.5, Math.min(3, z + dz)))}
+        />
       </main>
 
-      <aside className="right-panel" role="complementary" aria-label="AI Reasoning Details">
-        {result ? (
-          <>
-            <section className="card insight-card fade-in">
-              <h2 className="card-title">🧠 Vertex AI INSIGHT</h2>
-              <div className={`risk-${result.priority.toLowerCase()}`} style={{marginBottom: '0.5rem'}}>
-                {result.priority.toUpperCase()} PRIORITY {result.intent.toUpperCase()}
-              </div>
-              <div style={{fontSize: '0.9rem'}}>{result.structuredResponse.justification}</div>
-            </section>
+      <aside className="sidebar right-panel glass-panel" role="complementary" aria-label="AI Decision Engine">
+        <div className="card-label">AI Decision Engine [Neural Output]</div>
+        {apiResponse ? (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
+            <div className="hud-card" style={{ borderLeft: `4px solid ${apiResponse.priority === 'high' ? 'var(--neon-red)' : 'var(--neon-blue)'}` }}>
+               <div className={`risk-${apiResponse.priority === 'high' ? 'high' : 'low'}`} style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+                 {apiResponse.priority.toUpperCase()} {apiResponse.intent.toUpperCase()} EVENT
+               </div>
+               <div style={{fontSize: '0.8rem', color: 'var(--text-active)'}}>Recalculating Path Network...</div>
+            </div>
 
-            <section className="card fade-in" style={{animationDelay: '0.1s'}}>
-              <h2 className="card-title">✅ RECOMMENDATION</h2>
-              <div style={{fontSize: '1rem', fontWeight: 600}}>{result.structuredResponse.message}</div>
-            </section>
+            <div className="hud-card">
+              <div className="card-label">Recommended Action</div>
+              <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'white' }}>{apiResponse.structuredResponse.message}</div>
+            </div>
 
-            <section className="card fade-in" style={{animationDelay: '0.2s'}}>
-              <h2 className="card-title">📍 NEXT ACTION</h2>
-              <div className="data-item">
-                <div className="data-label">DESTINATION</div>
-                <div className="data-value" style={{fontSize: '0.9rem'}}>{result.structuredResponse.destination}</div>
+            <div className="hud-card" style={{ background: 'rgba(0, 242, 255, 0.05)' }}>
+              <div className="card-label">System Reasoning</div>
+              <div style={{ fontSize: '0.85rem', color: 'var(--text-dim)', lineHeight: '1.5', fontFamily: 'var(--font-mono)' }}>
+                {typedReasoning}
               </div>
-              <div className="data-item" style={{marginTop: '0.5rem'}}>
-                <div className="data-label">PRIMARY ROUTE</div>
-                <div className="data-value" style={{fontSize: '0.9rem'}}>{result.structuredResponse.direction}</div>
-              </div>
-            </section>
-          </>
+            </div>
+          </div>
         ) : (
-          <div style={{color: 'var(--text-secondary)', textAlign: 'center', marginTop: '20vh'}}>
-             Initiate Command to Start Analysis
+          <div style={{ textAlign: 'center', marginTop: '100px', opacity: 0.5, fontFamily: 'var(--font-mono)' }}>
+             SYSTEM STANDBY // AWAITING COMMAND
           </div>
         )}
       </aside>
 
-      <footer className="footer" role="contentinfo">
-        <h2 className="card-title" style={{marginBottom: '0.5rem'}}>🔥 RECENT FIREBASE LOGS</h2>
-        <div style={{display: 'flex', flexDirection: 'column', gap: '0.5rem'}}>
-          {logs.length > 0 ? logs.map(log => (
-            <div key={log.id} style={{fontSize: '0.75rem', borderBottom: '1px solid #21262d', paddingBottom: '0.25rem', display: 'flex', justifyContent: 'space-between'}}>
-              <span style={{color: 'var(--text-secondary)'}}>
-                [{new Date(log.timestamp).toLocaleTimeString()}] <strong>{log.query}</strong>
-              </span>
-              <span style={{color: '#10b981'}}>{log.outcome?.destination || 'Processing...'}</span>
-            </div>
-          )) : (
-            <div style={{color: 'var(--text-secondary)', fontSize: '0.75rem'}}>No historical logs found. Run your first query.</div>
-          )}
+      <footer className="footer glass-panel sidebar" style={{ gridArea: 'footer', flexDirection: 'row', gap: '2rem' }}>
+        <div style={{ flex: 1 }}>
+          <div className="card-label">Firebase Interaction Logs [Audit Stream]</div>
+          <div style={{ height: '90px', overflowY: 'auto' }}>
+            {logs.slice(0, 5).map(l => (
+              <div key={l.id} style={{ fontSize: '0.75rem', display: 'flex', gap: '1.25rem', padding: '6px 0', borderBottom: '1px solid rgba(255,255,255,0.05)' }}>
+                <span style={{ color: 'var(--neon-blue)' }}>{new Date(l.timestamp).toLocaleTimeString()}</span>
+                <span style={{ flex: 1 }}>{l.query}</span>
+                <span style={{ color: 'var(--neon-green)', fontWeight: 'bold' }}>{l.intent.toUpperCase()}</span>
+              </div>
+            ))}
+          </div>
         </div>
       </footer>
     </div>
