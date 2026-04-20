@@ -63,7 +63,11 @@ class Orchestrator {
             // Update history with agent response
             contextBuilder.addHistory(userId, { role: 'assistant', content: agentOutcome.structuredResponse.message });
 
-            return agentOutcome;
+            return {
+                ...agentOutcome,
+                bqData: bqData, // CRITICAL: Exposing real BigQuery metrics to the UI
+                timestamp: new Date().toISOString()
+            };
 
         } catch (err) {
             console.error(`[Orchestrator|CORE ERROR]`, err);

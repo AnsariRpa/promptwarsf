@@ -32,4 +32,14 @@ router.get('/simulation', (req, res) => {
     res.json(simulationEngine.getZones());
 });
 
+// Fetch recent interactions from Firebase
+router.get('/logs', async (req, res) => {
+    try {
+        const logs = await firebaseService.getRecentLogs(5);
+        res.json(logs);
+    } catch (err) {
+        res.status(500).json({ error: 'Failed to fetch logs' });
+    }
+});
+
 module.exports = router;

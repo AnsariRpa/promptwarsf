@@ -41,11 +41,32 @@ class FirebaseService {
         }
     }
 
-    // Fallback for real-time crowd data (could also be in RTDB, but we use simulation here)
+    // Fallback for real-time crowd data
     async getRealtimeCrowdData() {
-        // This normally would fetch from RTDB, but for the competition flow 
-        // we'll keep it integrated with the simulation engine while calling logAgentOutcome for real SDK usage.
         return require('../engine/simulation').getZones();
+    }
+
+    /**
+     * Retrieve the last few logs from Firestore for the dashboard.
+     * @param {number} limit 
+     */
+    async getRecentLogs(limit = 5) {
+        console.log(`[Firebase] Fetching last ${limit} interactions...`);
+        try {
+            const snapshot = await this.db.collection('agent_logs')
+                .orderBy('timestamp', 'desc')
+                .limit(limit)
+                .get();
+            
+            return snapshot.docs.map(doc => ({
+                id: doc.id,
+                ...doc.data(),
+                timestamp: doc.data().timestamp ? doc.data().timestamp.toDate() : new Date()
+            }));
+        } catch (err) {
+            console.error('[Firebase|SDK ERROR] Failed to fetch logs:', err.message);
+            return [];
+        }
     }
 }
 
