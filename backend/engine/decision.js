@@ -7,106 +7,97 @@ class DecisionEngine {
 
     /**
      * Determines the best destination and route based on parameters.
-     * @param {string} intent - user intent derived initially (or default)
-     * @param {object} crowdData - real-time zones from Firebase
-     * @param {object} userSession - Context Builder session
-     * @param {object} bqData - BigQuery historical data
      */
-    decideRoute(intent, crowdData, userSession, bqData) {
-        console.log(`[Decision Engine] Calculating route strategy: ${userSession.preferences.routeStrategy} for intent: ${intent}`);
+    decideRoute(intent, crowdData, userSession, bqData, detectedStart = null, detectedDest = null) {
+        console.log(`[Decision Engine] Calculating route: ${detectedStart || 'Auto'} -> ${detectedDest || intent}`);
         
-        let possibleDestinations = [];
+        const validNodes = Object.keys(crowdData);
+        
+        // 1. Resolve Start Node exactly
+        const startNodeName = detectedStart || userSession.currentLocation;
+        const startNode = crowdData[startNodeName];
 
-        // Identify possible destinations based on intent
-        if (intent === 'food') {
-            possibleDestinations = ['Food Stall 1', 'Food Stall 2'];
-        } else if (intent === 'parking') {
-            possibleDestinations = ['Parking'];
-        } else if (intent === 'exit') {
-            possibleDestinations = ['North Gate', 'South Gate', 'East Gate', 'West Gate'];
-        } else {
-            // default wayfinding/general
-            possibleDestinations = ['Fan Booth'];
+        if (!startNode) {
+            return { error: 'START_NODE_MISSING', message: 'Current location is unknown. Please specify where you are (e.g., North Gate).' };
+        }
+        
+        // 2. Resolve Destination Node
+        let finalDestName = detectedDest;
+        
+        // If destination not detected, use intent-based nearest facility logic
+        if (!finalDestName || !crowdData[finalDestName]) {
+            finalDestName = this._findNearestFacility(startNode, crowdData, intent);
         }
 
-        // Apply strategy: shortest vs least crowded
-        let selectedDest = '';
-        let direction = '';
-        let justification = '';
-        let minimumCrowd = 101;
-
-        if (userSession.preferences.routeStrategy === 'least_crowded') {
-            // Find destination with absolute lowest crowd
-            possibleDestinations.forEach(dest => {
-                if (crowdData[dest] && crowdData[dest].crowdLevel < minimumCrowd) {
-                    minimumCrowd = crowdData[dest].crowdLevel;
-                    selectedDest = dest;
-                }
-            });
-            justification = `Recommended because it is the least congested option currently available.`;
-            direction = this._getDirectionForZone(selectedDest);
-        } else {
-            // Shortest route
-            selectedDest = possibleDestinations[0] || 'Center Field';
-            let currentCrowd = crowdData[selectedDest] ? crowdData[selectedDest].crowdLevel : 0;
-            
-            // Conflict handling: If shortest is extremely congested (>85%), fallback to least crowded if available
-            if (currentCrowd > 85 && possibleDestinations.length > 1) {
-                let altDest = null;
-                possibleDestinations.forEach(dest => {
-                    if (crowdData[dest] && crowdData[dest].crowdLevel < (altDest ? crowdData[altDest].crowdLevel : currentCrowd)) {
-                        altDest = dest;
-                    }
-                });
-                if (altDest && altDest !== selectedDest) {
-                    selectedDest = altDest;
-                    currentCrowd = crowdData[selectedDest].crowdLevel;
-                    justification = `Your usual shortest route is extremely congested right now. Rerouted to a clearer path.`;
-                } else {
-                    justification = `This is the shortest route, though be advised it is currently highly congested.`;
-                }
-            } else {
-                justification = `Selected based on your preference for the fastest route.`;
-            }
-            direction = this._getDirectionForZone(selectedDest);
-            minimumCrowd = currentCrowd;
+        const endNode = crowdData[finalDestName];
+        if (!endNode) {
+            return { error: 'DESTINATION_NOT_FOUND', message: 'I couldn\'t find a valid destination for your request.' };
         }
 
-        // Find alternative option
-        let alternativeDest = possibleDestinations.find(d => d !== selectedDest);
-        if (!alternativeDest && possibleDestinations.length > 0) alternativeDest = possibleDestinations[0]; // fallback
-        
-        let altCrowd = (alternativeDest && crowdData[alternativeDest]) ? crowdData[alternativeDest].crowdLevel : 0;
-        let alternative = {
-            destination: alternativeDest || 'N/A',
-            direction: alternativeDest ? this._getDirectionForZone(alternativeDest) : 'N/A',
-            crowdLevel: altCrowd
-        };
+        // 3. Calculate Distance (Euclidean * scale)
+        const dx = endNode.x - startNode.x;
+        const dy = endNode.y - startNode.y;
+        const distance = Math.round(Math.sqrt(dx * dx + dy * dy) * 1.2); // 1.2 scale factor for meters
+        const pathName = this._determinePathName(startNodeName, finalDestName);
 
-        if (bqData) {
-            justification += ` Additionally, our BigQuery historical analytics predicted a peak crowd of ${bqData.averageCrowd}% for this event type.`;
+        // 4. Logic: Congestion Check
+        const currentCrowd = endNode.crowdLevel;
+        let justification = `Route from ${startNodeName} to ${finalDestName} via ${pathName} is clear.`;
+        
+        if (currentCrowd > 80) {
+            justification = `The destination ${finalDestName} is currently very crowded (${currentCrowd}%). I suggest waiting or checking alternative spots.`;
+        } else if (currentCrowd > 50) {
+            justification = `The ${finalDestName} has moderate traffic.`;
+        }
+
+        if (bqData && bqData.congestionLevel === 'High') {
+            justification += ` Note: Historical trends show high activity in this zone at this time.`;
         }
 
         return {
-            destination: selectedDest,
-            direction: direction,
-            crowdLevel: minimumCrowd,
+            startNode: startNodeName,
+            destination: finalDestName,
+            distance: `${distance}m`,
+            pathName: pathName,
+            crowdLevel: currentCrowd,
             justification: justification,
-            alternative: alternative
+            direction: `${pathName} -> ${finalDestName}`,
+            status: 'success'
         };
     }
 
-    _getDirectionForZone(zone) {
-        if (!zone) return 'Main Corridors';
-        if (zone.includes('North')) return 'North Path';
-        if (zone.includes('South')) return 'South Path';
-        if (zone.includes('East')) return 'East Path';
-        if (zone.includes('West')) return 'West Path';
-        if (zone === 'Food Stall 1') return 'North-East Walkway';
-        if (zone === 'Food Stall 2') return 'South-West Walkway';
-        if (zone === 'Fan Booth') return 'Central Promenade';
-        if (zone === 'Parking' || zone === 'Transport') return 'Outer Ring Road';
-        return 'Main Corridors';
+    _findNearestFacility(startNode, crowdData, intent) {
+        let targetType = 'gate';
+        if (intent === 'food') targetType = 'food';
+        else if (intent === 'emergency' || intent === 'aid') targetType = 'aid';
+        else if (intent === 'exit') targetType = 'gate';
+        else if (intent === 'merch') targetType = 'merch';
+
+        let nearest = null;
+        let minDist = Infinity;
+
+        Object.entries(crowdData).forEach(([name, node]) => {
+            if (node.type === targetType && name !== 'North Gate') { // Exclude generic if specific requested
+                const dx = node.x - startNode.x;
+                const dy = node.y - startNode.y;
+                const d = dx * dx + dy * dy;
+                if (d < minDist) {
+                    minDist = d;
+                    nearest = name;
+                }
+            }
+        });
+
+        return nearest || 'Fan Plaza'; // Fallback to Fan Plaza if nothing found
+    }
+
+    _determinePathName(start, end) {
+        if (start.includes('Gate') && end.includes('Gate')) return 'Outer Perimeter Road';
+        if (start.includes('North') || end.includes('North')) return 'North Skyway';
+        if (start.includes('South') || end.includes('South')) return 'South Link';
+        if (start.includes('East') || end.includes('East')) return 'East Gallery';
+        if (start.includes('West') || end.includes('West')) return 'West Corridor';
+        return 'Central Promenade';
     }
 }
 

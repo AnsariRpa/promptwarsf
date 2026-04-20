@@ -11,7 +11,7 @@ class Orchestrator {
     }
 
     /**
-     * Main agent flow: User Input -> BigQuery -> Vertex AI -> Firebase -> Output
+     * Main agent flow: User Input -> NLU -> Validation -> Routing -> Explanation -> Feedback
      */
     async processUserQuery(userId, query) {
         console.log(`[Orchestrator] Processing query for User: ${userId} -> "${query}"`);
@@ -21,65 +21,101 @@ class Orchestrator {
             const session = contextBuilder.getSession(userId);
             contextBuilder.addHistory(userId, { role: 'user', content: query });
 
-            // 2. Initial Data Gathering: Real-time from Firebase (Simulation helper)
+            // 2. Data Gathering: Real-time from Simulation
             const crowdData = await firebaseService.getRealtimeCrowdData();
+            const nodeNames = Object.keys(crowdData);
 
-            // 3. Intent Pre-classification for Data Fetching logic
-            let baseIntent = 'wayfinding';
-            if (query.match(/emergency|fire|help/i)) baseIntent = 'emergency';
-            else if (query.match(/food|eat|hungry/i)) baseIntent = 'food';
-            else if (query.match(/park|car/i)) baseIntent = 'parking';
-            else if (query.match(/exit|leave/i)) baseIntent = 'exit';
+            // 3. PHASE 1: NLU Meta-data Extraction (Stricter Constraints)
+            const metadata = await vertexAIService.extractMetadata(query, nodeNames, session.history);
+            
+            const startNode = metadata.current_location;
+            const destNode = metadata.destination;
 
-            // 4. BIGQUERY DATA FETCH (MANDATORY)
-            // Fetch historical patterns to improve decision making
-            let bqData = null;
-            try {
-                bqData = await bigQueryService.getHistoricalPattern(
-                    baseIntent === 'exit' ? 'Gates' : 'Stadium',
-                    baseIntent === 'food' ? 'halftime' : 'normal'
-                );
-            } catch (err) {
-                console.error('[Orchestrator] BigQuery Fetch Error, continuing with engine defaults.');
+            // 4. PHASE 2: Deterministic Validation Layer
+            // Critical Fix: DO NOT proceed if start is Unknown.
+            if (!startNode || !crowdData[startNode]) {
+                const errorMsg = "I need to know your current location to provide accurate directions. Please specify where you are (e.g., 'I am at West Gate').";
+                contextBuilder.addHistory(userId, { role: 'assistant', content: errorMsg });
+                return {
+                    intent: 'clarification',
+                    priority: 'high',
+                    currentLocation: null,
+                    destination: destNode,
+                    structuredResponse: {
+                        message: errorMsg,
+                        status: 'error',
+                        errorType: 'LOCATION_REQUIRED'
+                    }
+                };
             }
 
-            // 5. Decision Engine logic (Rule-based pre-processing)
-            const decisionData = decisionEngine.decideRoute(baseIntent, crowdData, session, bqData);
+            // Update session with detected location
+            contextBuilder.updateLocation(userId, startNode);
 
-            // 6. VERTEX AI PROCESSING (MANDATORY)
-            // Active usage of SDK: Analysis, classification, and reasoning
-            const agentOutcome = await vertexAIService.classifyIntentAndReason(query, session, decisionData);
-            
-            // 7. FIREBASE LOGGING (MANDATORY/RECOMMENDED)
-            // Active usage of SDK: Persisting interaction traces
+            // 5. PHASE 3: Deterministic Routing (Decision Engine)
+            let bqData = null;
+            try {
+                bqData = await bigQueryService.getHistoricalPattern(startNode, metadata.intent || 'wayfinding');
+            } catch (err) { console.error('[Orchestrator] BigQuery Fetch Error'); }
+
+            const routeDetails = decisionEngine.decideRoute(
+                metadata.intent, 
+                crowdData, 
+                session, 
+                bqData,
+                startNode,
+                destNode
+            );
+
+            if (routeDetails.error) {
+                return {
+                    intent: metadata.intent,
+                    priority: 'normal',
+                    currentLocation: startNode,
+                    structuredResponse: {
+                        message: routeDetails.message,
+                        status: 'error'
+                    }
+                };
+            }
+
+            // 6. PHASE 4: Final Narrative Explainer (AI Assist)
+            // AI is used only to beautify the DETERMINISTIC route
+            const reasoning = await vertexAIService.generateResponse(query, routeDetails);
+
+            // 7. PERSISTENCE
             await firebaseService.logAgentOutcome(userId, {
                 query,
-                intent: agentOutcome.intent,
-                structuredResponse: agentOutcome.structuredResponse
+                intent: metadata.intent,
+                structuredResponse: { ...routeDetails, message: reasoning.message }
             });
 
-            console.log(`[Orchestrator] Final Response generated by Vertex AI. Outcome logged to Firebase.`);
+            console.log(`[Orchestrator] Final Response synchronized. ${startNode} -> ${routeDetails.destination}`);
             
-            // Update history with agent response
-            contextBuilder.addHistory(userId, { role: 'assistant', content: agentOutcome.structuredResponse.message });
+            contextBuilder.addHistory(userId, { role: 'assistant', content: reasoning.message });
 
             return {
-                ...agentOutcome,
-                bqData: bqData, // CRITICAL: Exposing real BigQuery metrics to the UI
+                intent: metadata.intent,
+                priority: reasoning.priority,
+                currentLocation: startNode,
+                destination: routeDetails.destination,
+                structuredResponse: {
+                    ...routeDetails,
+                    message: reasoning.message
+                },
+                bqData: bqData,
                 timestamp: new Date().toISOString()
             };
 
         } catch (err) {
             console.error(`[Orchestrator|CORE ERROR]`, err);
             return {
-                intent: 'unknown',
+                intent: 'error',
                 priority: 'normal',
                 structuredResponse: {
-                    destination: 'Center Field Help Desk',
+                    destination: 'Help Desk',
                     direction: 'Central Paths',
-                    crowdLevel: 0,
-                    justification: 'System fall back due to error.',
-                    message: `I'm having trouble accessing my backend services. Please head safely to the Center Field Help Desk.`
+                    message: `System error occurred. Please proceed to the nearest steward or Help Desk.`
                 }
             };
         }

@@ -3,10 +3,11 @@ const { BigQuery } = require('@google-cloud/bigquery');
 
 class BigQueryService {
     constructor() {
+        const project = process.env.GOOGLE_CLOUD_PROJECT || 'pwapril';
         this.bigquery = new BigQuery({
-            projectId: process.env.GOOGLE_CLOUD_PROJECT || 'pwapril'
+            projectId: project
         });
-        console.log('[BigQuery] Service Client Initialized for project: pwapril');
+        console.log(`[BigQuery] Service Client Initialized for project: ${project}`);
     }
 
     /**
@@ -15,12 +16,13 @@ class BigQueryService {
      * @param {string} eventType 
      */
     async getHistoricalPattern(zone, eventType) {
+        const project = process.env.GOOGLE_CLOUD_PROJECT || 'pwapril';
         console.log(`[BigQuery] Executing real query for zone: ${zone}`);
         
         // REAL SDK USAGE: Explicit query execution
         const query = `
             SELECT average_crowd, peak_time
-            FROM \`pwapril.stadium_data.historical_analytics\`
+            FROM \`${project}.stadium_data.historical_analytics\`
             WHERE zone = @zone AND event_type = @eventType
             LIMIT 1
         `;

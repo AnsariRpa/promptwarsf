@@ -4,12 +4,13 @@ const admin = require('firebase-admin');
 class FirebaseService {
     constructor() {
         try {
+            const project = process.env.GOOGLE_CLOUD_PROJECT || 'pwapril';
             // REAL SDK USAGE: Initialize using default credentials or env project ID
             admin.initializeApp({
-                projectId: 'pwapril'
+                projectId: project
             });
             this.db = admin.firestore();
-            console.log('[Firebase] Admin SDK Initialized for Project: pwapril');
+            console.log(`[Firebase] Admin SDK Initialized for Project: ${project}`);
         } catch (err) {
             console.error('[Firebase|Init Error]', err.message);
         }

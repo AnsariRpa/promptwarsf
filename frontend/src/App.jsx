@@ -120,8 +120,18 @@ const MapEngine = ({ zones, pathways, recommendedPath, activeLayers, zoom, pan, 
                 strokeWidth="4" 
                 className="route-particle" 
               />
-              <circle cx={recommendedPath.split('L')[0].replace('M', '').split(',')[0]} cy={recommendedPath.split('L')[0].replace('M', '').split(',')[1]} r="6" fill="var(--neon-blue)" />
-              <circle cx={recommendedPath.split('L').pop().split(',')[0]} cy={recommendedPath.split('L').pop().split(',')[1]} r="8" fill="var(--neon-green)" />
+              {(() => {
+                const parts = recommendedPath.replace(/M|L/g, '').trim().split(/\s+/);
+                const start = parts[0]?.split(',');
+                const end = parts[1]?.split(',');
+                if (!start || !end) return null;
+                return (
+                  <>
+                    <circle cx={start[0]} cy={start[1]} r="6" fill="var(--neon-blue)" />
+                    <circle cx={end[0]} cy={end[1]} r="8" fill="var(--neon-green)" />
+                  </>
+                );
+              })()}
             </g>
           )}
 
@@ -159,7 +169,7 @@ function App() {
     data: true, gate: true, food: true, aid: true, vip: true, metro: true, cab: true, fanzone: true, merch: true, security: true, restroom: true
   });
 
-  const typedReasoning = useTypewriter(apiResponse?.structuredResponse.justification, 18, !!apiResponse);
+  const typedReasoning = useTypewriter(apiResponse?.structuredResponse?.justification, 18, !!apiResponse);
 
   // Initialize and keep state stable
   useEffect(() => {
@@ -190,10 +200,8 @@ function App() {
   const handleAnalysis = async () => {
     if (!query || isProcessing) return;
     setIsProcessing(true);
-    // Persist activeRoute until new results come in
 
     try {
-      // Step 1: BigQuery Link
       setActiveStep('bq');
       await new Promise(r => setTimeout(r, 900));
       
@@ -204,11 +212,9 @@ function App() {
       });
       const data = await res.json();
 
-      // Step 2: Vertex Intelligence
       setActiveStep('vertex');
       await new Promise(r => setTimeout(r, 1200));
 
-      // Step 3: Firebase Persistence
       setActiveStep('firebase');
       await new Promise(r => setTimeout(r, 800));
 
@@ -216,13 +222,23 @@ function App() {
       setIsProcessing(false);
       setActiveStep(null);
       
-      // Update Route from Gate to Destination
-      const dest = data.structuredResponse.destination || 'Fan Plaza';
-      const startNode = zones['North Gate'] || {x: 250, y: 50};
-      const endNode = zones[dest] || {x: 250, y: 250};
-      setActiveRoute(`M ${startNode.x},${startNode.y} L ${endNode.x},${endNode.y}`);
+      // Update Route ONLY if not a clarification request
+      if (data.intent !== 'clarification') {
+        const startKey = data.currentLocation;
+        const endKey = data.destination;
+        
+        const startNode = zones[startKey];
+        const endNode = zones[endKey];
+        
+        if (startNode && endNode) {
+          setActiveRoute(`M ${startNode.x},${startNode.y} L ${endNode.x},${endNode.y}`);
+        } else {
+          setActiveRoute(null);
+        }
+      } else {
+        setActiveRoute(null); // Clear route if clarifying
+      }
       
-      // Refresh Logs
       const logRes = await fetch('/api/logs');
       setLogs(await logRes.json());
     } catch (err) {
@@ -240,26 +256,7 @@ function App() {
         </div>
       </header>
 
-      <aside className="sidebar left-panel glass-panel" role="complementary" aria-label="Command Center">
-        <section className="hud-card">
-          <div className="card-label">Command Center [Operator Input]</div>
-          <input 
-            type="text" 
-            placeholder="ACCESSING STADIUM NETWORK..." 
-            value={query}
-            onChange={(e) => setQuery(e.target.value)}
-            onKeyDown={(e) => e.key === 'Enter' && handleAnalysis()}
-            aria-label="Input Query for Stadium AI"
-          />
-          <button 
-            onClick={handleAnalysis} 
-            disabled={isProcessing}
-            style={{ width: '100%', marginTop: '0.75rem' }}
-          >
-            {isProcessing ? 'SCANNING...' : 'EXECUTE SCAN'}
-          </button>
-        </section>
-
+      <aside className="sidebar left-panel glass-panel" role="complementary" aria-label="Monitoring Station">
         <section className="hud-card">
           <div className="card-label">Live Signal Flow [Service Monitoring]</div>
           <div className={`step-item ${activeStep === 'bq' ? 'active' : ''} ${apiResponse ? 'success' : ''}`}>
@@ -294,6 +291,50 @@ function App() {
       </aside>
 
       <main className="map-viewport" role="main" aria-label="Interactive Navigation Console">
+        {/* NEW Top-Center Search HUB with improved UX */}
+        <div className="search-hub">
+          <div className={`search-bar-container ${apiResponse?.structuredResponse?.status === 'error' ? 'error-pulse' : ''}`}>
+            <div className="search-icon" style={{ opacity: 0.5 }}>🔍</div>
+            <input 
+              type="text" 
+              placeholder="e.g. I am at West Gate, where is the Medical Station?" 
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={(e) => e.key === 'Enter' && handleAnalysis()}
+              aria-label="Search Stadium Network"
+            />
+            {query && (
+              <button 
+                onClick={() => { setQuery(''); setApiResponse(null); setActiveRoute(null); }} 
+                className="clear-btn"
+                title="Clear Search"
+              >
+                ✕
+              </button>
+            )}
+            <button 
+              className="search-btn" 
+              onClick={handleAnalysis} 
+              disabled={isProcessing}
+              title="Locate Route"
+            >
+              {isProcessing ? '...' : '▶'}
+            </button>
+          </div>
+
+          {/* Correct metadata display - ONLY shows if valid data exists */}
+          {apiResponse && apiResponse.currentLocation && apiResponse.destination && (
+            <div className="context-display">
+              <div className="context-tag source">
+                 <span className="tag-label">FROM</span> {apiResponse.currentLocation}
+              </div>
+              <div className="context-tag dest">
+                 <span className="tag-label">TO</span> {apiResponse.destination}
+              </div>
+            </div>
+          )}
+        </div>
+
         <div className="layer-toggles">
           {Object.keys(layers).map(layer => (
             <button 
@@ -330,20 +371,32 @@ function App() {
         <div className="card-label">AI Decision Engine [Neural Output]</div>
         {apiResponse ? (
           <div style={{ display: 'flex', flexDirection: 'column', gap: '1.25rem' }}>
-            <div className="hud-card" style={{ borderLeft: `4px solid ${apiResponse.priority === 'high' ? 'var(--neon-red)' : 'var(--neon-blue)'}` }}>
-               <div className={`risk-${apiResponse.priority === 'high' ? 'high' : 'low'}`} style={{ fontWeight: 'bold', marginBottom: '4px' }}>
-                 {apiResponse.priority.toUpperCase()} {apiResponse.intent.toUpperCase()} EVENT
+            <div className="hud-card" style={{ borderLeft: `4px solid ${(apiResponse.priority || 'normal') === 'high' ? 'var(--neon-red)' : 'var(--neon-blue)'}` }}>
+               <div className={`risk-${(apiResponse.priority || 'normal') === 'high' ? 'high' : 'low'}`} style={{ fontWeight: 'bold', marginBottom: '4px' }}>
+                 {(apiResponse.priority || 'NORMAL').toUpperCase()} {(apiResponse.intent || 'UNKNOWN').toUpperCase()} DETECTED
                </div>
-               <div style={{fontSize: '0.8rem', color: 'var(--text-active)'}}>Recalculating Path Network...</div>
+               <div style={{fontSize: '0.7rem', opacity: 0.6, fontFamily: 'var(--font-mono)' }}>
+                  SESSION_ID: AI_OP_{Math.floor(Math.random()*9000)}
+               </div>
             </div>
 
             <div className="hud-card">
-              <div className="card-label">Recommended Action</div>
-              <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'white' }}>{apiResponse.structuredResponse.message}</div>
+              <div className="card-label">Navigational Guidance</div>
+              <div style={{ fontSize: '1.1rem', fontWeight: 'bold', color: 'white', marginBottom: '8px' }}>
+                {apiResponse.structuredResponse?.message || 'Processing...'}
+              </div>
+              <div style={{ display: 'flex', gap: '10px' }}>
+                 <div className="context-tag" style={{ flex: 1, fontSize: '0.65rem' }}>
+                    📏 {apiResponse.structuredResponse?.distance || '-- m'}
+                 </div>
+                 <div className="context-tag" style={{ flex: 1, fontSize: '0.65rem' }}>
+                    🛤️ {apiResponse.structuredResponse?.pathName || '--'}
+                 </div>
+              </div>
             </div>
 
             <div className="hud-card" style={{ background: 'rgba(0, 242, 255, 0.05)' }}>
-              <div className="card-label">System Reasoning</div>
+              <div className="card-label">Neural Reasoning</div>
               <div style={{ fontSize: '0.85rem', color: 'var(--text-dim)', lineHeight: '1.5', fontFamily: 'var(--font-mono)' }}>
                 {typedReasoning}
               </div>
