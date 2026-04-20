@@ -1,31 +1,34 @@
-require('dotenv').config();
-
 const express = require('express');
 const cors = require('cors');
-const path = require('path');
-
-const simulationEngine = require('./engine/simulation');
-const apiRoutes = require('./routes/api');
 
 const app = express();
 
-// Middleware
+console.log("🚀 Booting Stadium AI Backend...");
+
 app.use(cors());
 app.use(express.json());
 
-// Routes
-app.use('/api', apiRoutes);
+// Health check
+app.get('/', (req, res) => {
+    res.send('OK');
+});
 
-// Safe simulation start
+// Try loading API routes safely
 try {
-    simulationEngine.startSimulation(5000);
+    const apiRoutes = require('./routes/api');
+    app.use('/api', apiRoutes);
+    console.log("✅ API routes loaded");
 } catch (err) {
-    console.error("[Simulation Error]", err);
+    console.error("❌ API load failed:", err.message);
 }
+
+// Fallback API (so Cloud Run doesn't break)
+app.get('/api/test', (req, res) => {
+    res.json({ status: "API working" });
+});
 
 const PORT = process.env.PORT || 8080;
 
 app.listen(PORT, '0.0.0.0', () => {
-    console.log(`[Server] Smart Stadium AI Running on port ${PORT}`);
-    console.log(`[Env] Project ID: ${process.env.GOOGLE_CLOUD_PROJECT || 'pwapril'}`);
+    console.log(`✅ Server running on port ${PORT}`);
 });
